@@ -24,7 +24,6 @@ const firstLoginController = {
 
       console.log(`🔍 Verificando primer login - userId: ${userId}`);
 
-      // ✅ USAR getUserById en lugar de get()
       const userResponse = await apiClient.getUserById(userId);
       
       if (!userResponse.success || !userResponse.data) {
@@ -88,7 +87,7 @@ const firstLoginController = {
 
       console.log(`🔍 Obteniendo datos del usuario ${userId}...`);
 
-      // 1️⃣ Obtener datos del usuario - ✅ USA getUserById
+      // 1️⃣ Obtener datos del usuario
       const userResponse = await apiClient.getUserById(userId);
       
       if (!userResponse.success || !userResponse.data) {
@@ -131,10 +130,10 @@ const firstLoginController = {
       console.log('🔐 Hasheando nueva contraseña...');
       const newPasswordHash = await bcrypt.hash(newPassword, 12);
 
-      // 5️⃣ ACTUALIZAR: Nueva contraseña + es_temporal = false - ✅ USA updateUser
-      console.log('📝 Actualizando contraseña en BD...');
+      // 5️⃣ 🔥 CORRECCIÓN CRÍTICA: Usar contrasena_hasheada
+      console.log('🔄 Actualizando contraseña en BD...');
       const updateResponse = await apiClient.updateUser(userId, {
-        contrasena: newPasswordHash,
+        contrasena_hasheada: newPasswordHash, // 🔥 CAMBIO: Indicar que ya está hasheada
         es_temporal: false
       });
 
@@ -144,7 +143,7 @@ const firstLoginController = {
 
       console.log(`✅ Contraseña cambiada y marcada como NO temporal`);
 
-      // 6️⃣ Obtener usuario actualizado - ✅ USA getUserById
+      // 6️⃣ Obtener usuario actualizado
       const updatedUserResponse = await apiClient.getUserById(userId);
       const updatedUser = updatedUserResponse.data;
 
@@ -152,7 +151,6 @@ const firstLoginController = {
       if (updatedUser.mfa_activo && updatedUser.mfa_secreto) {
         console.log('🔐 Usuario tiene MFA activado, requiere verificación');
         
-        // Usuario ya tiene MFA configurado - requiere verificación
         const tempToken = jwt.sign(
           { 
             userId: updatedUser.id, 
@@ -256,7 +254,6 @@ const firstLoginController = {
 
       // Si el usuario NO quiere MFA, completar el login
       if (!enableMFA) {
-        // ✅ USA getUserById
         const userResponse = await apiClient.getUserById(userId);
         const user = userResponse.data;
 
