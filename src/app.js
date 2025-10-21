@@ -9,7 +9,13 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 // Middleware
-app.use(cors());
+app.use(cors({
+  origin: [
+    'http://localhost:8080',
+    'https://tu-dominio-produccion.com'
+  ],
+  credentials: true
+}));
 app.use(express.json());
 
 // Routes
