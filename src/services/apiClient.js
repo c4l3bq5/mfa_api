@@ -1,7 +1,7 @@
 // mfa-service/src/services/apiClient.js
 const axios = require('axios');
 
-const MAIN_API_URL = process.env.MAIN_API_URL || 'http://localhost:3000/api';
+const MAIN_API_URL = process.env.MAIN_API_URL || 'https://apimed-production.up.railway.app/api';
 
 class ApiClient {
   constructor() {
@@ -37,6 +37,60 @@ class ApiClient {
     );
   }
 
+  // ==================== MÉTODOS GENÉRICOS ====================
+
+  /**
+   * GET genérico
+   */
+  async get(endpoint) {
+    try {
+      const response = await this.client.get(endpoint);
+      return response.data;
+    } catch (error) {
+      console.error(`Error GET ${endpoint}:`, error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * POST genérico
+   */
+  async post(endpoint, data) {
+    try {
+      const response = await this.client.post(endpoint, data);
+      return response.data;
+    } catch (error) {
+      console.error(`Error POST ${endpoint}:`, error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * PUT genérico
+   */
+  async put(endpoint, data) {
+    try {
+      const response = await this.client.put(endpoint, data);
+      return response.data;
+    } catch (error) {
+      console.error(`Error PUT ${endpoint}:`, error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * PATCH genérico
+   */
+  async patch(endpoint, data) {
+    try {
+      const response = await this.client.patch(endpoint, data);
+      return response.data;
+    } catch (error) {
+      console.error(`Error PATCH ${endpoint}:`, error.message);
+      throw error;
+    }
+  }
+
   // ==================== MÉTODOS DE USUARIO ====================
 
   /**
@@ -44,27 +98,11 @@ class ApiClient {
    */
   async getUserById(userId) {
     try {
-      const response = await this.client.get(`/users/${userId}`);
-      return response.data.data || response.data;
+      const response = await this.get(`/users/${userId}`);
+      return response.data || response;
     } catch (error) {
       console.error(`Error getting user ${userId}:`, error.message);
       throw new Error(`No se pudo obtener el usuario: ${error.message}`);
-    }
-  }
-
-  /**
-   * Verificar credenciales de usuario
-   */
-  async verifyCredentials(username, password) {
-    try {
-      const response = await this.client.post('/auth/login', {
-        usuario: username,
-        contrasena: password
-      });
-      return response.data;
-    } catch (error) {
-      console.error('Error verifying credentials:', error.message);
-      throw new Error('Credenciales inválidas');
     }
   }
 
@@ -73,8 +111,8 @@ class ApiClient {
    */
   async updateUser(userId, updateData) {
     try {
-      const response = await this.client.put(`/users/${userId}`, updateData);
-      return response.data;
+      const response = await this.put(`/users/${userId}`, updateData);
+      return response;
     } catch (error) {
       console.error(`Error updating user ${userId}:`, error.message);
       throw new Error(`No se pudo actualizar el usuario: ${error.message}`);
@@ -82,16 +120,16 @@ class ApiClient {
   }
 
   /**
-   * 🔥 NUEVO: Actualizar contraseña de usuario (para cambio de password temporal)
+   * Actualizar contraseña de usuario
    */
   async updateUserPassword(userId, passwordData) {
     try {
       console.log(`🔑 Updating password for user ${userId}`);
       
-      const response = await this.client.put(`/users/${userId}`, passwordData);
+      const response = await this.put(`/users/${userId}`, passwordData);
       
       console.log(`✅ Password updated for user ${userId}`);
-      return response.data.data || response.data;
+      return response.data || response;
     } catch (error) {
       console.error(`❌ Error updating password for user ${userId}:`, error.message);
       throw new Error(`No se pudo actualizar la contraseña: ${error.message}`);
@@ -105,11 +143,11 @@ class ApiClient {
    */
   async enableMFA(userId, secret) {
     try {
-      const response = await this.client.patch(`/users/${userId}/enable-mfa`, {
+      const response = await this.patch(`/users/${userId}/enable-mfa`, {
         mfa_secreto: secret,
         mfa_activo: true
       });
-      return response.data;
+      return response;
     } catch (error) {
       console.error(`Error enabling MFA for user ${userId}:`, error.message);
       throw new Error(`No se pudo habilitar MFA: ${error.message}`);
@@ -121,47 +159,32 @@ class ApiClient {
    */
   async disableMFA(userId) {
     try {
-      const response = await this.client.patch(`/users/${userId}/disable-mfa`);
-      return response.data;
+      const response = await this.patch(`/users/${userId}/disable-mfa`);
+      return response;
     } catch (error) {
       console.error(`Error disabling MFA for user ${userId}:`, error.message);
       throw new Error(`No se pudo deshabilitar MFA: ${error.message}`);
     }
   }
 
-  /**
-   * Actualizar configuración MFA
-   */
-  async updateMFASettings(userId, mfaData) {
-    try {
-      const response = await this.client.patch(`/users/${userId}/enable-mfa`, mfaData);
-      return response.data;
-    } catch (error) {
-      console.error(`Error updating MFA settings for user ${userId}:`, error.message);
-      throw new Error(`No se pudo actualizar MFA: ${error.message}`);
-    }
-  }
-
   // ==================== MÉTODOS DE SESIÓN ====================
 
   /**
-   * 🔥 NUEVO: Crear sesión en api_rest después del login
+   * Crear sesión en api_rest después del login
    */
   async createSession(userId, token) {
     try {
-      console.log(`📝 Creating session for user ${userId}`);
+      console.log(`🔐 Creating session for user ${userId}`);
       
-      // El endpoint de sessions en api_rest
-      const response = await this.client.post('/sessions', {
+      const response = await this.post('/sessions', {
         usuario_id: userId,
         token: token
       });
       
       console.log(`✅ Session created for user ${userId}`);
-      return response.data;
+      return response;
     } catch (error) {
       console.error(`❌ Error creating session for user ${userId}:`, error.message);
-      // No lanzar error, solo advertir - la sesión no es crítica
       console.warn(`⚠️ Continuing without session creation`);
       return null;
     }
@@ -174,8 +197,8 @@ class ApiClient {
    */
   async healthCheck() {
     try {
-      const response = await this.client.get('/health');
-      return response.data;
+      const response = await this.get('/health');
+      return response;
     } catch (error) {
       console.error('Health check failed:', error.message);
       return { status: 'error', message: error.message };

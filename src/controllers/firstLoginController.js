@@ -1,7 +1,10 @@
 // mfa-service/src/controllers/firstLoginController.js
 const apiClient = require('../services/apiClient');
 const jwt = require('jsonwebtoken');
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs'); // Cambiar a bcryptjs
+
+const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '24h';
 
 const firstLoginController = {
   /**
@@ -21,7 +24,7 @@ const firstLoginController = {
 
       console.log(`🔍 Verificando primer login - userId: ${userId}`);
 
-      // Obtener usuario desde api_rest
+      // Obtener usuario desde api_rest usando el método get genérico
       const userResponse = await apiClient.get(`/users/${userId}`);
       
       if (!userResponse.success || !userResponse.data) {
@@ -59,24 +62,31 @@ const firstLoginController = {
    */
   async changeTemporaryPassword(req, res, next) {
     try {
-      const { userId, oldPassword, newPassword } = req.body;
+      const { userId, currentPassword, newPassword } = req.body;
+
+      console.log('🔐 Iniciando cambio de contraseña temporal...');
+      console.log('📦 Datos recibidos:', { 
+        userId, 
+        hasCurrentPassword: !!currentPassword, 
+        hasNewPassword: !!newPassword 
+      });
 
       // Validaciones
-      if (!userId || !oldPassword || !newPassword) {
+      if (!userId || !currentPassword || !newPassword) {
         return res.status(400).json({
           success: false,
-          message: 'Faltan campos requeridos'
+          message: 'userId, currentPassword y newPassword son requeridos'
         });
       }
 
-      if (newPassword.length < 6) {
+      if (newPassword.length < 8) {
         return res.status(400).json({
           success: false,
-          message: 'La nueva contraseña debe tener al menos 6 caracteres'
+          message: 'La nueva contraseña debe tener al menos 8 caracteres'
         });
       }
 
-      console.log(`🔐 Cambio de contraseña temporal - userId: ${userId}`);
+      console.log(`🔍 Obteniendo datos del usuario ${userId}...`);
 
       // 1️⃣ Obtener datos del usuario
       const userResponse = await apiClient.get(`/users/${userId}`);
@@ -89,8 +99,9 @@ const firstLoginController = {
       }
 
       const user = userResponse.data;
+      console.log('✅ Usuario encontrado:', user.usuario);
 
-      // 2️⃣ ✅ VALIDACIÓN CRÍTICA: Verificar que la contraseña sea temporal
+      // 2️⃣ VALIDACIÓN CRÍTICA: Verificar que la contraseña sea temporal
       if (user.es_temporal !== true) {
         return res.status(400).json({
           success: false,
@@ -98,20 +109,30 @@ const firstLoginController = {
         });
       }
 
+      console.log('✅ Usuario tiene contraseña temporal');
+
       // 3️⃣ Verificar que la contraseña temporal sea correcta
-      const isValidOldPassword = await bcrypt.compare(oldPassword, user.contrasena);
+      const isValidOldPassword = await bcrypt.compare(
+        currentPassword, 
+        user.contrasena
+      );
       
       if (!isValidOldPassword) {
+        console.log('❌ Contraseña temporal incorrecta');
         return res.status(401).json({
           success: false,
           message: 'La contraseña temporal es incorrecta'
         });
       }
 
+      console.log('✅ Contraseña temporal verificada');
+
       // 4️⃣ Hashear la nueva contraseña
+      console.log('🔐 Hasheando nueva contraseña...');
       const newPasswordHash = await bcrypt.hash(newPassword, 12);
 
-      // 5️⃣ ✅ ACTUALIZAR: Nueva contraseña + es_temporal = false (UN SOLO USO)
+      // 5️⃣ ACTUALIZAR: Nueva contraseña + es_temporal = false
+      console.log('📝 Actualizando contraseña en BD...');
       const updateResponse = await apiClient.put(`/users/${userId}`, {
         contrasena: newPasswordHash,
         es_temporal: false // ← CRÍTICO: Marca como NO temporal
@@ -121,7 +142,7 @@ const firstLoginController = {
         throw new Error('Error al actualizar la contraseña');
       }
 
-      console.log(`✅ Contraseña cambiada y marcada como NO temporal - userId: ${userId}`);
+      console.log(`✅ Contraseña cambiada y marcada como NO temporal`);
 
       // 6️⃣ Obtener usuario actualizado
       const updatedUserResponse = await apiClient.get(`/users/${userId}`);
@@ -129,6 +150,8 @@ const firstLoginController = {
 
       // 7️⃣ Verificar si requiere MFA
       if (updatedUser.mfa_activo && updatedUser.mfa_secreto) {
+        console.log('🔐 Usuario tiene MFA activado, requiere verificación');
+        
         // Usuario ya tiene MFA configurado - requiere verificación
         const tempToken = jwt.sign(
           { 
@@ -136,7 +159,7 @@ const firstLoginController = {
             step: 'mfa',
             usuario: updatedUser.usuario 
           },
-          process.env.JWT_SECRET || 'your-secret-key',
+          JWT_SECRET,
           { expiresIn: '10m' }
         );
 
@@ -160,6 +183,8 @@ const firstLoginController = {
         });
       }
 
+      console.log('✅ Usuario sin MFA, generando token final');
+
       // 8️⃣ No tiene MFA - generar token final
       const finalToken = jwt.sign(
         {
@@ -169,15 +194,17 @@ const firstLoginController = {
           rol_nombre: updatedUser.rol_nombre,
           persona_id: updatedUser.persona_id
         },
-        process.env.JWT_SECRET || 'your-secret-key',
-        { expiresIn: process.env.JWT_EXPIRES_IN || '24h' }
+        JWT_SECRET,
+        { expiresIn: JWT_EXPIRES_IN }
       );
 
       // 9️⃣ Crear sesión en api_rest
-      await apiClient.post('/sessions', {
-        usuario_id: updatedUser.id,
-        token: finalToken
-      });
+      try {
+        await apiClient.createSession(updatedUser.id, finalToken);
+        console.log('✅ Sesión creada en api_rest');
+      } catch (sessionError) {
+        console.warn('⚠️ No se pudo crear sesión, pero continuando:', sessionError.message);
+      }
 
       console.log(`✅ Login completo sin MFA - userId: ${userId}`);
 
@@ -202,7 +229,11 @@ const firstLoginController = {
 
     } catch (error) {
       console.error('❌ Error en changeTemporaryPassword:', error);
-      next(error);
+      res.status(500).json({
+        success: false,
+        message: 'Error al cambiar contraseña',
+        error: error.message
+      });
     }
   },
 
@@ -236,14 +267,11 @@ const firstLoginController = {
             rol_nombre: user.rol_nombre,
             persona_id: user.persona_id
           },
-          process.env.JWT_SECRET || 'your-secret-key',
-          { expiresIn: process.env.JWT_EXPIRES_IN || '24h' }
+          JWT_SECRET,
+          { expiresIn: JWT_EXPIRES_IN }
         );
 
-        await apiClient.post('/sessions', {
-          usuario_id: user.id,
-          token: finalToken
-        });
+        await apiClient.createSession(user.id, finalToken);
 
         return res.json({
           success: true,
