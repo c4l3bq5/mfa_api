@@ -1,7 +1,7 @@
 // mfa-service/src/controllers/firstLoginController.js
 const apiClient = require('../services/apiClient');
 const jwt = require('jsonwebtoken');
-const bcrypt = require('bcryptjs'); // Cambiar a bcryptjs
+const bcrypt = require('bcryptjs');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '24h';
@@ -24,8 +24,8 @@ const firstLoginController = {
 
       console.log(`🔍 Verificando primer login - userId: ${userId}`);
 
-      // Obtener usuario desde api_rest usando el método get genérico
-      const userResponse = await apiClient.get(`/users/${userId}`);
+      // ✅ USAR getUserById en lugar de get()
+      const userResponse = await apiClient.getUserById(userId);
       
       if (!userResponse.success || !userResponse.data) {
         return res.status(404).json({
@@ -88,8 +88,8 @@ const firstLoginController = {
 
       console.log(`🔍 Obteniendo datos del usuario ${userId}...`);
 
-      // 1️⃣ Obtener datos del usuario
-      const userResponse = await apiClient.get(`/users/${userId}`);
+      // 1️⃣ Obtener datos del usuario - ✅ USA getUserById
+      const userResponse = await apiClient.getUserById(userId);
       
       if (!userResponse.success || !userResponse.data) {
         return res.status(404).json({
@@ -131,11 +131,11 @@ const firstLoginController = {
       console.log('🔐 Hasheando nueva contraseña...');
       const newPasswordHash = await bcrypt.hash(newPassword, 12);
 
-      // 5️⃣ ACTUALIZAR: Nueva contraseña + es_temporal = false
+      // 5️⃣ ACTUALIZAR: Nueva contraseña + es_temporal = false - ✅ USA updateUser
       console.log('📝 Actualizando contraseña en BD...');
-      const updateResponse = await apiClient.put(`/users/${userId}`, {
+      const updateResponse = await apiClient.updateUser(userId, {
         contrasena: newPasswordHash,
-        es_temporal: false // ← CRÍTICO: Marca como NO temporal
+        es_temporal: false
       });
 
       if (!updateResponse.success) {
@@ -144,8 +144,8 @@ const firstLoginController = {
 
       console.log(`✅ Contraseña cambiada y marcada como NO temporal`);
 
-      // 6️⃣ Obtener usuario actualizado
-      const updatedUserResponse = await apiClient.get(`/users/${userId}`);
+      // 6️⃣ Obtener usuario actualizado - ✅ USA getUserById
+      const updatedUserResponse = await apiClient.getUserById(userId);
       const updatedUser = updatedUserResponse.data;
 
       // 7️⃣ Verificar si requiere MFA
@@ -256,7 +256,8 @@ const firstLoginController = {
 
       // Si el usuario NO quiere MFA, completar el login
       if (!enableMFA) {
-        const userResponse = await apiClient.get(`/users/${userId}`);
+        // ✅ USA getUserById
+        const userResponse = await apiClient.getUserById(userId);
         const user = userResponse.data;
 
         const finalToken = jwt.sign(
