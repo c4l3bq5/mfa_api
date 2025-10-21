@@ -1,3 +1,4 @@
+// mfa-service/src/services/apiClient.js
 const axios = require('axios');
 
 const MAIN_API_URL = process.env.MAIN_API_URL || 'http://localhost:3000/api';
@@ -80,6 +81,23 @@ class ApiClient {
     }
   }
 
+  /**
+   * 🔥 NUEVO: Actualizar contraseña de usuario (para cambio de password temporal)
+   */
+  async updateUserPassword(userId, passwordData) {
+    try {
+      console.log(`🔑 Updating password for user ${userId}`);
+      
+      const response = await this.client.put(`/users/${userId}`, passwordData);
+      
+      console.log(`✅ Password updated for user ${userId}`);
+      return response.data.data || response.data;
+    } catch (error) {
+      console.error(`❌ Error updating password for user ${userId}:`, error.message);
+      throw new Error(`No se pudo actualizar la contraseña: ${error.message}`);
+    }
+  }
+
   // ==================== MÉTODOS MFA ====================
 
   /**
@@ -121,6 +139,31 @@ class ApiClient {
     } catch (error) {
       console.error(`Error updating MFA settings for user ${userId}:`, error.message);
       throw new Error(`No se pudo actualizar MFA: ${error.message}`);
+    }
+  }
+
+  // ==================== MÉTODOS DE SESIÓN ====================
+
+  /**
+   * 🔥 NUEVO: Crear sesión en api_rest después del login
+   */
+  async createSession(userId, token) {
+    try {
+      console.log(`📝 Creating session for user ${userId}`);
+      
+      // El endpoint de sessions en api_rest
+      const response = await this.client.post('/sessions', {
+        usuario_id: userId,
+        token: token
+      });
+      
+      console.log(`✅ Session created for user ${userId}`);
+      return response.data;
+    } catch (error) {
+      console.error(`❌ Error creating session for user ${userId}:`, error.message);
+      // No lanzar error, solo advertir - la sesión no es crítica
+      console.warn(`⚠️ Continuing without session creation`);
+      return null;
     }
   }
 

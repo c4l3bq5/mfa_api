@@ -1,73 +1,52 @@
+// mfa-service/src/controllers/firstLoginController.js
 const apiClient = require('../services/apiClient');
 const mfaService = require('../services/mfaService');
-const { generateTempPassword, hashPassword } = require('../utils/helpers');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 
 class FirstLoginController {
 
-  // ==================== VERIFICAR PRIMER LOGIN ====================
+  // ==================== VERIFICAR SI ES PRIMER LOGIN ====================
   
   /**
-   * Verifica si es primer login con contraseña temporal
+   * Verifica si un usuario tiene contraseña temporal
    * POST /api/mfa/first-login/check
    */
   async checkFirstLogin(req, res) {
     try {
-      const { username, password } = req.body;
+      const { userId } = req.body;
 
-      // Validaciones
-      if (!username || !password) {
+      if (!userId) {
         return res.status(400).json({
           success: false,
-          message: 'username y password son requeridos'
+          message: 'userId es requerido'
         });
       }
 
-      console.log(` Checking first login for user: ${username}`);
+      console.log(`🔍 Checking first login for user ID: ${userId}`);
 
-      // 1. Verificar credenciales con API principal
-      let loginResult;
-      try {
-        loginResult = await apiClient.verifyCredentials(username, password);
-      } catch (error) {
-        return res.status(401).json({
+      // Obtener usuario de API principal
+      const user = await apiClient.getUserById(userId);
+      
+      if (!user) {
+        return res.status(404).json({
           success: false,
-          message: 'Credenciales inválidas'
+          message: 'Usuario no encontrado'
         });
       }
-
-      // 2. Obtener información completa del usuario
-      const user = await apiClient.getUserById(loginResult.user.id);
-
-      // 3. Determinar si es primer login
-      // Asumimos que contrasena_temporal indica primer login
-      const isFirstLogin = user.contrasena_temporal || false;
-      const requiresPasswordChange = isFirstLogin;
-      const hasMFAEnabled = user.mfa_activo || false;
-
-      console.log(` First login check for ${username}:`, {
-        isFirstLogin,
-        requiresPasswordChange,
-        hasMFAEnabled
-      });
 
       res.status(200).json({
         success: true,
         data: {
           userId: user.id,
+          requiresPasswordChange: user.es_temporal || false,
           username: user.usuario,
-          isFirstLogin,
-          requiresPasswordChange,
-          hasMFAEnabled,
-          userData: {
-            nombre: user.nombre,
-            email: user.mail,
-            rol: user.rol_nombre
-          }
+          hasMFAEnabled: user.mfa_activo || false
         }
       });
 
     } catch (error) {
-      console.error(' Error in checkFirstLogin:', error);
+      console.error('❌ Error in checkFirstLogin:', error);
       res.status(500).json({
         success: false,
         message: 'Error checking first login status',
@@ -79,79 +58,140 @@ class FirstLoginController {
   // ==================== CAMBIAR CONTRASEÑA TEMPORAL ====================
   
   /**
-   * Cambiar contraseña temporal por definitiva
+   * Cambia la contraseña temporal del primer login
    * POST /api/mfa/first-login/change-password
    */
   async changeTemporaryPassword(req, res) {
     try {
-      const { userId, currentPassword, newPassword, confirmPassword } = req.body;
+      const { userId, oldPassword, newPassword } = req.body;
 
       // Validaciones
-      if (!userId || !currentPassword || !newPassword || !confirmPassword) {
+      if (!userId || !oldPassword || !newPassword) {
         return res.status(400).json({
           success: false,
-          message: 'Todos los campos son requeridos'
+          message: 'userId, oldPassword y newPassword son requeridos'
         });
       }
 
-      if (newPassword !== confirmPassword) {
+      if (newPassword.length < 6) {
         return res.status(400).json({
           success: false,
-          message: 'Las contraseñas no coinciden'
+          message: 'La nueva contraseña debe tener al menos 6 caracteres'
         });
       }
 
-      if (newPassword.length < 8) {
-        return res.status(400).json({
-          success: false,
-          message: 'La contraseña debe tener al menos 8 caracteres'
-        });
-      }
+      console.log(`🔐 Changing temporary password for user ID: ${userId}`);
 
-      console.log(` Changing temporary password for user ID: ${userId}`);
-
-      // 1. Verificar que la contraseña actual es correcta
-      // Para esto necesitamos obtener el usuario y verificar credenciales
+      // 1. Obtener usuario de API principal
       const user = await apiClient.getUserById(userId);
       
-      // En una implementación real, verificaríamos la contraseña actual
-      // contra el hash almacenado. Por ahora asumimos que es correcta
-      // ya que el usuario acaba de hacer login.
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          message: 'Usuario no encontrado'
+        });
+      }
 
-      // 2. Actualizar contraseña en API principal
-      await apiClient.updateUser(userId, {
-        contrasena: newPassword,
-        contrasena_temporal: false,
-        // Agregar campo de fecha de cambio de contraseña si existe
-        password_changed_at: new Date().toISOString()
+      // 2. Verificar que tiene contraseña temporal
+      if (!user.es_temporal) {
+        return res.status(400).json({
+          success: false,
+          message: 'El usuario no tiene contraseña temporal'
+        });
+      }
+
+      // 3. Verificar contraseña anterior
+      const isValidOldPassword = await bcrypt.compare(oldPassword, user.contrasena);
+      
+      if (!isValidOldPassword) {
+        return res.status(401).json({
+          success: false,
+          message: 'Contraseña temporal incorrecta'
+        });
+      }
+
+      // 4. Hash de nueva contraseña
+      const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+      // 5. Actualizar contraseña en API principal
+      await apiClient.updateUserPassword(userId, {
+        contrasena: hashedPassword,
+        es_temporal: false
       });
 
-      console.log(` Password changed successfully for user ID: ${userId}`);
+      console.log(`✅ Temporary password changed for user ID: ${userId}`);
+
+      // 6. Obtener usuario actualizado
+      const updatedUser = await apiClient.getUserById(userId);
+
+      // 7. Generar token JWT
+      let finalToken = null;
+      let requiresMFA = false;
+
+      const JWT_SECRET = process.env.JWT_SECRET || process.env.API_MASTER_TOKEN;
+
+      if (updatedUser.mfa_activo) {
+        // Si tiene MFA, generar token temporal para paso MFA
+        requiresMFA = true;
+        finalToken = jwt.sign(
+          { 
+            userId: updatedUser.id, 
+            step: 'mfa',
+            usuario: updatedUser.usuario 
+          },
+          JWT_SECRET,
+          { expiresIn: '10m' }
+        );
+      } else {
+        // Si NO tiene MFA, generar token final
+        finalToken = jwt.sign(
+          {
+            id: updatedUser.id,
+            usuario: updatedUser.usuario,
+            rol_id: updatedUser.rol_id,
+            rol_nombre: updatedUser.rol_nombre,
+            persona_id: updatedUser.persona_id
+          },
+          JWT_SECRET,
+          { expiresIn: '24h' }
+        );
+
+        // Crear sesión en API principal
+        try {
+          await apiClient.createSession(updatedUser.id, finalToken);
+        } catch (sessionError) {
+          console.error('⚠️ Warning: Could not create session:', sessionError.message);
+          // No fallar si la sesión no se puede crear
+        }
+      }
+
+      // Remover campos sensibles
+      const { contrasena, mfa_secreto, ...userWithoutSensitive } = updatedUser;
 
       res.status(200).json({
         success: true,
-        message: 'Contraseña actualizada exitosamente',
+        message: 'Contraseña cambiada exitosamente',
         data: {
-          userId,
-          passwordChanged: true,
-          requiresMFA: true // Recomendar configurar MFA después
+          requiresMFA,
+          token: finalToken,
+          user: userWithoutSensitive
         }
       });
 
     } catch (error) {
-      console.error(' Error in changeTemporaryPassword:', error);
+      console.error('❌ Error in changeTemporaryPassword:', error);
       res.status(500).json({
         success: false,
-        message: 'Error changing password',
+        message: 'Error al cambiar contraseña',
         error: error.message
       });
     }
   }
 
-  // ==================== CONFIGURAR MFA DESPUÉS DE PRIMER LOGIN ====================
+  // ==================== CONFIGURAR MFA DESPUÉS DEL PRIMER LOGIN ====================
   
   /**
-   * Configurar MFA después de cambiar contraseña temporal
+   * Permite configurar MFA después del primer login (opcional)
    * POST /api/mfa/first-login/setup-mfa
    */
   async setupMFAAfterFirstLogin(req, res) {
@@ -165,7 +205,7 @@ class FirstLoginController {
         });
       }
 
-      console.log(` Setting up MFA after first login for user ID: ${userId}`);
+      console.log(`🔐 Setting up MFA after first login for user ID: ${userId}`);
 
       // 1. Verificar código MFA
       const isValid = mfaService.verifyToken(secret, mfaCode);
@@ -178,15 +218,12 @@ class FirstLoginController {
       }
 
       // 2. Activar MFA en API principal
-      await apiClient.updateMFASettings(userId, {
-        mfa_secreto: secret,
-        mfa_activo: true
-      });
+      await apiClient.enableMFA(userId, secret);
 
       // 3. Generar códigos de respaldo
       const backupCodes = mfaService.generateBackupCodes();
 
-      console.log(` MFA setup completed for user ID: ${userId}`);
+      console.log(`✅ MFA setup completed for user ID: ${userId}`);
 
       res.status(200).json({
         success: true,
@@ -195,97 +232,15 @@ class FirstLoginController {
           userId,
           mfaEnabled: true,
           backupCodes,
-          setupComplete: true
+          warning: 'Guarda estos códigos de respaldo en un lugar seguro'
         }
       });
 
     } catch (error) {
-      console.error(' Error in setupMFAAfterFirstLogin:', error);
+      console.error('❌ Error in setupMFAAfterFirstLogin:', error);
       res.status(500).json({
         success: false,
-        message: 'Error setting up MFA',
-        error: error.message
-      });
-    }
-  }
-
-  // ==================== FLUJO COMPLETO PRIMER LOGIN ====================
-  
-  /**
-   * Flujo completo para primer login
-   * POST /api/mfa/first-login/complete
-   */
-  async completeFirstLoginFlow(req, res) {
-    try {
-      const { 
-        userId, 
-        currentPassword, 
-        newPassword, 
-        confirmPassword,
-        mfaCode,
-        secret 
-      } = req.body;
-
-      console.log(` Starting complete first login flow for user ID: ${userId}`);
-
-      // 1. Validaciones básicas
-      if (!userId || !currentPassword || !newPassword || !confirmPassword) {
-        return res.status(400).json({
-          success: false,
-          message: 'Datos de contraseña requeridos'
-        });
-      }
-
-      if (newPassword !== confirmPassword) {
-        return res.status(400).json({
-          success: false,
-          message: 'Las contraseñas no coinciden'
-        });
-      }
-
-      // 2. Cambiar contraseña temporal
-      await this.changeTemporaryPassword(req, res);
-      
-      // Si hay error en changeTemporaryPassword, se propaga
-      if (res.headersSent) return;
-
-      // 3. Si se proporcionó configuración MFA, configurarla
-      if (mfaCode && secret) {
-        const mfaRequest = {
-          body: { userId, mfaCode, secret }
-        };
-        const mfaResponse = {
-          status: (code) => ({
-            json: (data) => {
-              if (code !== 200) {
-                throw new Error(data.message);
-              }
-            }
-          })
-        };
-
-        await this.setupMFAAfterFirstLogin(mfaRequest, mfaResponse);
-      }
-
-      console.log(` First login flow completed for user ID: ${userId}`);
-
-      // 4. Respuesta final
-      res.status(200).json({
-        success: true,
-        message: 'Flujo de primer login completado exitosamente',
-        data: {
-          userId,
-          passwordChanged: true,
-          mfaEnabled: !!(mfaCode && secret),
-          setupComplete: true
-        }
-      });
-
-    } catch (error) {
-      console.error(' Error in completeFirstLoginFlow:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Error completing first login flow',
+        message: 'Error al configurar MFA',
         error: error.message
       });
     }
@@ -308,13 +263,15 @@ class FirstLoginController {
         });
       }
 
-      console.log(` Generating MFA setup data for user: ${username}`);
+      console.log(`📱 Generating MFA setup data for user: ${username}`);
 
       // 1. Generar secreto MFA
       const secretData = mfaService.generateSecret(username);
       
-      // 2. Generar QR Code
+      // 2. Generar URL para Authenticator
       const otpauthUrl = mfaService.generateOTPAuthUrl(username, secretData.base32);
+      
+      // 3. Generar QR Code
       const qrCode = await mfaService.generateQRCode(otpauthUrl);
 
       res.status(200).json({
@@ -324,15 +281,15 @@ class FirstLoginController {
           secret: secretData.base32,
           qrCode,
           otpauthUrl,
-          message: 'Use este QR para configurar Google Authenticator'
+          message: 'Escanea este QR con Google Authenticator'
         }
       });
 
     } catch (error) {
-      console.error(' Error in getMFASetupData:', error);
+      console.error('❌ Error in getMFASetupData:', error);
       res.status(500).json({
         success: false,
-        message: 'Error generating MFA setup data',
+        message: 'Error al generar datos de configuración MFA',
         error: error.message
       });
     }
