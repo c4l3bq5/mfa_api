@@ -94,12 +94,17 @@ class ApiClient {
   // ==================== MÉTODOS DE USUARIO ====================
 
   /**
-   * Obtener usuario por ID
+   * Obtener usuario por ID (INTERNO - Sin autenticación)
    */
   async getUserById(userId) {
     try {
-      const response = await this.get(`/users/${userId}`);
-      return response.data || response;
+      // ✅ Usar endpoint interno
+      const response = await this.get(`/users/${userId}/internal`);
+      // ✅ Retornar en el formato esperado: { success: true, data: {...} }
+      return {
+        success: true,
+        data: response.data || response
+      };
     } catch (error) {
       console.error(`Error getting user ${userId}:`, error.message);
       throw new Error(`No se pudo obtener el usuario: ${error.message}`);
@@ -107,11 +112,12 @@ class ApiClient {
   }
 
   /**
-   * Actualizar usuario
+   * Actualizar usuario (INTERNO - Sin autenticación)
    */
   async updateUser(userId, updateData) {
     try {
-      const response = await this.put(`/users/${userId}`, updateData);
+      // ✅ Usar endpoint interno
+      const response = await this.put(`/users/${userId}/internal`, updateData);
       return response;
     } catch (error) {
       console.error(`Error updating user ${userId}:`, error.message);
@@ -120,13 +126,14 @@ class ApiClient {
   }
 
   /**
-   * Actualizar contraseña de usuario
+   * Actualizar contraseña de usuario (INTERNO - Sin autenticación)
    */
   async updateUserPassword(userId, passwordData) {
     try {
       console.log(`🔑 Updating password for user ${userId}`);
       
-      const response = await this.put(`/users/${userId}`, passwordData);
+      // ✅ Usar endpoint interno para contraseñas
+      const response = await this.put(`/users/${userId}/internal`, passwordData);
       
       console.log(`✅ Password updated for user ${userId}`);
       return response.data || response;
