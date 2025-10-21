@@ -10,47 +10,15 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 // ==================== CORS CONFIGURATION ====================
-// ✅ Configuración mejorada para development y production
-const allowedOrigins = [
-  'http://localhost:8080',
-  'http://localhost:3000',
-  'http://localhost:5173', // Vite
-  'https://apimed-production.up.railway.app',
-  'https://mfaapi-production.up.railway.app',
-  'https://wharecovery-production.up.railway.app',
-];
-
-// Si estás en desarrollo local, permitir cualquier origen
-if (process.env.NODE_ENV === 'development') {
-  app.use(cors({
-    origin: '*',
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
-    credentials: true,
-    preflightContinue: false,
-    optionsSuccessStatus: 204
-  }));
-} else {
-  // En producción, ser más estricto
-  app.use(cors({
-    origin: function (origin, callback) {
-      // Permitir requests sin origin (mobile apps, curl, postman, etc.)
-      if (!origin) return callback(null, true);
-      
-      if (allowedOrigins.indexOf(origin) !== -1) {
-        callback(null, true);
-      } else {
-        console.log('⚠️ Origin bloqueado:', origin);
-        callback(null, true); // Permitir de todos modos en Railway
-      }
-    },
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
-    credentials: true,
-    preflightContinue: false,
-    optionsSuccessStatus: 204
-  }));
-}
+// ✅ CORS PERMISIVO - Permite TODOS los orígenes
+app.use(cors({
+  origin: '*', // Permitir TODOS los orígenes
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+  credentials: false, // Cambiar a false cuando origin es '*'
+  preflightContinue: false,
+  optionsSuccessStatus: 204
+}));
 
 // ==================== MIDDLEWARE ====================
 app.use(express.json());
@@ -58,7 +26,7 @@ app.use(express.urlencoded({ extended: true }));
 
 // Logging middleware (útil para debugging)
 app.use((req, res, next) => {
-  console.log(`📥 ${req.method} ${req.path}`);
+  console.log(`📥 ${req.method} ${req.path} - Origin: ${req.headers.origin || 'No origin'}`);
   if (req.method === 'POST' && req.body) {
     console.log('📦 Body:', JSON.stringify(req.body, null, 2));
   }
